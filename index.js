@@ -52,6 +52,8 @@ app.get('/process-audio', async (req, res) => {
 
         speechRecognizer.recognizeOnceAsync((result) => {
 
+            console.log(result);
+
             // Convierte el string JSON en un objeto JavaScript
             const parsedJson = JSON.parse(result.privJson);
 
