@@ -1,7 +1,11 @@
 require('dotenv').config();
+const express = require('express');
 const sdk = require("microsoft-cognitiveservices-speech-sdk");
 const getAudio = require('./getAudio');
 const convertOggToWav = require('./convertAudio');
+
+const app = express();
+const port = process.env.PORT || 3000;
 
 const speechConfig = sdk.SpeechConfig.fromSubscription(
     process.env.AZURE_SUBSCRIPTION_KEY,
@@ -10,58 +14,77 @@ const speechConfig = sdk.SpeechConfig.fromSubscription(
 
 speechConfig.speechRecognitionLanguage = "en-US";
 
-async function fromFile() {
+// Endpoint para procesar el audio
+app.get('/process-audio', async (req, res) => {
 
-    // Descargamos el archivo de audio desde la URL
-    const audioData = await getAudio('https://cdn.mosquedacordova.com/c2/isaac.ogg');
+    // Obtenemos la URL del archivo de la query string
+    const { audioUrl } = req.query;
 
-    // Convertir el archivo OGG a WAV en memoria (sin escribir en disco)
-    const wavData = await convertOggToWav(audioData);  // Aquí convertimos el buffer OGG a WAV    
+    if (!audioUrl) {
+        return res.status(400).json({ error: 'La URL del audio es obligatoria' });
+    }
+    try {
 
-    let audioConfig = sdk.AudioConfig.fromWavFileInput(wavData);
-    let speechRecognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+        // Descargamos el archivo de audio desde la URL
+        const audioData = await getAudio(audioUrl);
 
-    //let referenceText = "Welcome to my life";
-    let gradingSystem = sdk.PronunciationAssessmentGradingSystem.HundredMark;
-    let granularity = sdk.PronunciationAssessmentGranularity.Phoneme;
-    //let enableMiscue = true; 
+        // Convertir el archivo OGG a WAV en memoria (sin escribir en disco)
+        const wavData = await convertOggToWav(audioData);
 
-    let pronunciationAssessmentConfig = new sdk.PronunciationAssessmentConfig( 
-        "", 
-        gradingSystem,  
-        granularity, 
-        false 
-    ); 
+        let audioConfig = sdk.AudioConfig.fromWavFileInput(wavData);
+        let speechRecognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
 
-    pronunciationAssessmentConfig.enableProsodyAssessment =true; 
+        //let referenceText = "Welcome to my life";
+        let gradingSystem = sdk.PronunciationAssessmentGradingSystem.HundredMark;
+        let granularity = sdk.PronunciationAssessmentGranularity.Phoneme;
+        //let enableMiscue = true; 
 
-    pronunciationAssessmentConfig.applyTo(speechRecognizer);
+        let pronunciationAssessmentConfig = new sdk.PronunciationAssessmentConfig( 
+            "", 
+            gradingSystem,  
+            granularity, 
+            false 
+        ); 
 
-    speechRecognizer.recognizeOnceAsync((result) => {
+        pronunciationAssessmentConfig.enableProsodyAssessment =true; 
 
-        // Convierte el string JSON en un objeto JavaScript
-        const parsedJson = JSON.parse(result.privJson);
+        pronunciationAssessmentConfig.applyTo(speechRecognizer);
 
-        const { RecognitionStatus, NBest } = parsedJson;
-        const formattedResult = {
-            RecognitionStatus,
-            NBest: NBest.map(item => ({
-                Lexical: item.Lexical,
-                Words: item.Words.map(word => ({
-                    Word: word.Word,
-                    Phonemes: word.Phonemes.map(phoneme => ({
-                        Phoneme: phoneme.Phoneme,
-                        PronunciationAssessment: phoneme.PronunciationAssessment
+        speechRecognizer.recognizeOnceAsync((result) => {
+
+            // Convierte el string JSON en un objeto JavaScript
+            const parsedJson = JSON.parse(result.privJson);
+
+            const { RecognitionStatus, NBest } = parsedJson;
+            const formattedResult = {
+                RecognitionStatus,
+                NBest: NBest.map(item => ({
+                    Lexical: item.Lexical,
+                    Words: item.Words.map(word => ({
+                        Word: word.Word,
+                        Phonemes: word.Phonemes.map(phoneme => ({
+                            Phoneme: phoneme.Phoneme,
+                            PronunciationAssessment: phoneme.PronunciationAssessment
+                        }))
                     }))
                 }))
-            }))
-        };
+            };
 
-        // Muestra el resultado formateado
-        console.log(JSON.stringify(formattedResult, null, 2));
-        
+            // Muestra el resultado formateado
+            res.json(formattedResult);
 
-        speechRecognizer.close();
-    });
-}
-fromFile();
+            speechRecognizer.close();
+        });
+
+    } catch (error) {
+        // Si ocurre algún error, lo respondemos con un error 500
+        console.error(error);
+        res.status(500).json({ error: 'Ocurrió un error procesando el archivo de audio' });
+    }
+
+});
+
+// Iniciar el servidor
+app.listen(port, () => {
+    console.log(`API corriendo en http://localhost:${port}`);
+});
